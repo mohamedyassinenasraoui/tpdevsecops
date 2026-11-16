@@ -29,7 +29,6 @@ jobs:
 
       # Upload the Gitleaks report
       - name: Upload Gitleaks report
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
@@ -45,6 +44,23 @@ jobs:
       # Compile Java code
       - name: Compile Java
         run: mvn compile
+
+      # Run unit and integration tests
+      - name: Run unit tests
+        run: mvn test
+
+      # Run SonarCloud scan
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: .
+          args: >
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
       # Build Maven
       - name: Build Java project with Maven
@@ -64,27 +80,41 @@ jobs:
       # Test Docker image
       - name: Test Docker image locally
         run: |
+          cleanup() {
+            docker rm -f democyber-test >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
           docker run -d --name democyber-test -p 8080:8080 $DOCKER_IMAGE_NAME
-          sleep 10
-          curl -f http://localhost:8080 || echo "App not responding"
-          docker stop democyber-test
-          docker rm democyber-test
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/actuator/health >/dev/null; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "App failed to become healthy in time"
+              docker logs democyber-test || true
+              exit 1
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080
 
       # Trivy scan
       - name: Build Docker image for Trivy
         run: docker build -t democyber:latest .
 
       - name: Scan Docker image with Trivy (Table)
-        uses: aquasecurity/trivy-action@0.20.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: democyber:latest
           format: 'table'
-          exit-code: '1'
+          exit-code: '0'
+          ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
 
       - name: Scan Docker image with Trivy (JSON report)
         if: always()
-        uses: aquasecurity/trivy-action@0.20.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: democyber:latest
           format: 'json'

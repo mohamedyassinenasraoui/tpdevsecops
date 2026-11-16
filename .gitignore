@@ -31,3 +31,9 @@ build/
 ### VS Code ###
 .vscode/
 
+### Security reports & local secrets ###
+results.sarif
+trivy-report.json
+token.txt
+
+
